@@ -1,7 +1,4 @@
-﻿using System.Net.Sockets;
-using Caruti.Server.Abstractions.Interfaces;
-
-namespace Caruti.Server.Abstractions;
+﻿namespace Caruti.Server.Abstractions;
 
 public abstract class Connection : IConnection
 {
@@ -31,7 +28,7 @@ public abstract class Connection : IConnection
 
         if (disposing)
         {
-            Stream?.Dispose();
+            Stream.Dispose();
         }
 
         _disposed = true;

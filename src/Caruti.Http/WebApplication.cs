@@ -1,15 +1,16 @@
-﻿using Caruti.Server.Abstractions.Interfaces;
+﻿namespace Caruti.Http;
 
-namespace Caruti.Http;
-
-public class WebApplication
+public class WebApplication : IWebApplication
 {
     private IApplicationServer Server { get; }
+
+    private readonly ICollection<Func<IRequest, IResponse, Func<Task>, Task>> _middlewares;
 
     public WebApplication(IApplicationServer server)
     {
         Server = server;
         Server.OnReceiveConnection = ReceiveConnection;
+        _middlewares = new List<Func<IRequest, IResponse, Func<Task>, Task>>();
     }
 
     public Task Listen(CancellationToken cancellationToken = default)
@@ -17,11 +18,12 @@ public class WebApplication
         return Server.Listen(cancellationToken);
     }
 
-    private async Task ReceiveConnection(IConnection connection)
+    private async Task ReceiveConnection(IConnection connection, CancellationToken cancellationToken)
     {
-        await using var stream = connection.Stream;
-        while (connection.Connected)
+        var stream = connection.Stream;
+        while (connection.Connected && !cancellationToken.IsCancellationRequested)
         {
+            //TODO: add configuration capability to change default request size
             var buffer = new byte[1024 * 8];
             var bufferIndex = 0;
             while (stream.Socket.Available != 0)
@@ -33,27 +35,46 @@ public class WebApplication
             if (bufferIndex == 0)
                 continue;
 
-            WriteLine("Buffer length: " + buffer.Length);
-            WriteLine("Available data size: " + bufferIndex);
-
             var readOnlyBuffer = new ReadOnlyMemory<byte>(buffer);
+
+            //TODO: share between request/response protocol informations
             var request = new Request(readOnlyBuffer);
+            var response = new Response(request.Protocol, stream);
 
-            WriteLine(request.Method);
-            WriteLine(request.Path);
-            WriteLine(request.Query);
+            try
+            {
+                await InvokeMiddlewareChain(request, response, _middlewares.GetEnumerator());
+            }
+            catch (Exception e)
+            {
+                connection.Close();
+                WriteLine(e);
+                continue;
+            }
 
-            const string content = "<h1>Hello world</h1>";
-            var writer = new StreamWriter(stream);
-            await writer.WriteAsync("HTTP/1.1 200 OK");
-            await writer.WriteAsync(Environment.NewLine);
-            await writer.WriteAsync("Content-Type: text/html; charset=UTF-8");
-            await writer.WriteAsync(Environment.NewLine);
-            await writer.WriteAsync("Content-Length: " + content.Length);
-            await writer.WriteAsync(Environment.NewLine);
-            await writer.WriteAsync(Environment.NewLine);
-            await writer.WriteAsync(content);
-            await writer.FlushAsync();
+            if (!request.Headers.ContainsKey("Connection") || !request.Headers["Connection"].Contains("keep-alive"))
+                connection.Close();
         }
     }
+
+    private static async Task InvokeMiddlewareChain(
+        IRequest request,
+        IResponse response,
+        IEnumerator<Func<IRequest, IResponse, Func<Task>, Task>> enumerator)
+    {
+        if (!enumerator.MoveNext())
+            return;
+
+        await enumerator.Current.Invoke(request, response,
+            async () => await InvokeMiddlewareChain(request, response, enumerator));
+    }
+
+    public void Use(Func<IRequest, IResponse, Func<Task>, Task> action) => _middlewares.Add(action);
+
+    public void Use(Func<IRequest, IResponse, Task> action) =>
+        _middlewares.Add(async (request, response, next) =>
+        {
+            await action.Invoke(request, response);
+            await next();
+        });
 }

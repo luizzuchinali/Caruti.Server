@@ -1,6 +1,4 @@
-﻿using Caruti.Server.Abstractions.Interfaces;
-
-namespace Caruti.Server.Tcp;
+﻿namespace Caruti.Server.Tcp;
 
 public class TcpApplicationServer : ApplicationServer
 {

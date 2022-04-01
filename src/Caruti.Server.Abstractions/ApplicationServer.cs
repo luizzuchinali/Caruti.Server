@@ -1,13 +1,11 @@
-﻿using Caruti.Server.Abstractions.Interfaces;
-
-namespace Caruti.Server.Abstractions;
+﻿namespace Caruti.Server.Abstractions;
 
 public abstract class ApplicationServer : IApplicationServer
 {
     public IPAddress Address { get; }
     public uint Port { get; }
     public Action? OnListen { get; set; }
-    public Func<IConnection, Task>? OnReceiveConnection { get; set; }
+    public Func<IConnection, CancellationToken, Task>? OnReceiveConnection { get; set; }
 
     protected ApplicationServer(string address, uint port = 8080)
     {
@@ -25,13 +23,11 @@ public abstract class ApplicationServer : IApplicationServer
         while (!cancellationToken.IsCancellationRequested)
         {
             var connection = await AcceptConnection();
-            var awaiter = Task.Run(async () =>
-            {
-                if (OnReceiveConnection is null)
-                    return;
-                await OnReceiveConnection.Invoke(connection);
-            }, cancellationToken).GetAwaiter();
-            awaiter.OnCompleted(() => { connection.Close(); });
+            if (OnReceiveConnection is null)
+                continue;
+
+            _ = OnReceiveConnection.Invoke(connection, cancellationToken)
+                .ContinueWith(_ => connection.Close(), cancellationToken);
         }
     }
 }

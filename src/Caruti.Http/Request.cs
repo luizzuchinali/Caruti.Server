@@ -1,12 +1,14 @@
 ﻿namespace Caruti.Http;
 
-public sealed class Request
+public sealed class Request : IRequest
 {
     public string Method { get; }
     public string Path { get; }
     public string Protocol { get; }
     public string? Query { get; }
-    public byte[] Body { get; }
+
+    //TODO: Implement request body setter
+    public byte[]? Body { get; }
     public IDictionary<string, string[]> Headers { get; } = new Dictionary<string, string[]>();
 
     public Request(ReadOnlyMemory<byte> buffer)
@@ -16,8 +18,6 @@ public sealed class Request
         (Protocol, currentBuffer) = GetNextWord(currentBuffer).GetOrThrowException();
 
         Query = GetQueryString();
-
-        WriteLine(Encoding.UTF8.GetString(currentBuffer.Span));
 
         var result = GetNextHeader(currentBuffer);
         while (result != null)
@@ -39,7 +39,7 @@ public sealed class Request
             var word = Encoding.UTF8.GetString(span[..i]);
             _ = word ?? throw new MalformedHttpRequestException();
 
-            return (word, buffer[(i + 2)..]);
+            return (word, buffer[(i + 1)..]);
         }
 
         return null;
