@@ -1,13 +1,10 @@
-﻿using System.Collections.Immutable;
-using System.Collections.ObjectModel;
-using System.Net.Sockets;
-
-namespace Caruti.Http;
+﻿namespace Caruti.Http;
 
 public sealed class Request : IRequest
 {
     public string Method { get; private set; }
     public string Path { get; private set; }
+    public string Uri { get; private set; }
     public string Protocol { get; private set; }
     public string? Query { get; }
 
@@ -16,14 +13,16 @@ public sealed class Request : IRequest
     public IReadOnlyDictionary<string, string> Headers { get; private set; }
 
     private Request(string method,
-        string path,
+        string uri,
         string protocol,
         string? query,
         IReadOnlyDictionary<string, string> headers,
         byte[] body)
     {
         Method = method;
-        Path = path;
+        Uri = uri;
+        var queryStringInitializerIndex = Uri.IndexOf('?');
+        Path = queryStringInitializerIndex == -1 ? Uri : Uri[..queryStringInitializerIndex];
         Protocol = protocol;
         Query = query;
         Headers = headers;

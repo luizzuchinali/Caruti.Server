@@ -7,14 +7,18 @@
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <RootNamespace>Caruti.App</RootNamespace>
-        
+
         <ServerGarbageCollection>true</ServerGarbageCollection>
         <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Caruti.Server.Tcp\Caruti.Server.Tcp.csproj" />
-      <ProjectReference Include="..\Caruti.Http\Caruti.Http.csproj" />
+        <ProjectReference Include="..\Caruti.Server.Tcp\Caruti.Server.Tcp.csproj" />
+        <ProjectReference Include="..\Caruti.Http\Caruti.Http.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="public\**" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
 </Project>

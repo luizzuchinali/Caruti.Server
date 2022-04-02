@@ -8,6 +8,8 @@ public class WebApplication : IWebApplication
 
     private readonly ICollection<Func<IRequest, IResponse, Func<Task>, Task>> _middlewares;
 
+    private CancellationToken _cancellationToken = CancellationToken.None;
+
     public WebApplication(IApplicationServer server)
     {
         Server = server;
@@ -18,16 +20,18 @@ public class WebApplication : IWebApplication
 
     public Task Listen(CancellationToken cancellationToken = default)
     {
+        _cancellationToken = cancellationToken;
+
         Use(async (request, response) =>
         {
-            if (!_routes.ContainsKey(request.Path))
-            {
-                await response.StatusCode(EStatusCode.NotFound);
-            }
-            else
+            if (_routes.ContainsKey(request.Path))
             {
                 var route = _routes[request.Path];
                 await route.Invoke(request, response);
+            }
+            else
+            {
+                await response.StatusCode(EStatusCode.NotFound);
             }
         });
 
@@ -58,6 +62,7 @@ public class WebApplication : IWebApplication
                 continue;
             }
 
+            //TODO: Change how server reacts for Connection header
             if (!request.Headers.ContainsKey("Connection") || !request.Headers["Connection"].Contains("keep-alive"))
                 break;
         }
@@ -86,4 +91,24 @@ public class WebApplication : IWebApplication
 
     public void Use(string path, Func<IRequest, IResponse, Task> action) =>
         _routes.Add(new KeyValuePair<string, Func<IRequest, IResponse, Task>>(path, action));
+
+    public void UseStaticFiles(string basePath)
+    {
+        _middlewares.Add(async (request, response, next) =>
+        {
+            if (request.Path.StartsWith('/' + basePath))
+            {
+                var filePath = Path.Combine(Environment.CurrentDirectory, request.Path[1..]);
+                if (File.Exists(filePath) && !request.Path.Contains(".."))
+                {
+                    var fileBuffer = await File.ReadAllBytesAsync(filePath, _cancellationToken);
+                    await response.SendFile(fileBuffer, Path.GetFileName(filePath));
+                }
+                else
+                    await response.StatusCode(EStatusCode.NotFound);
+            }
+            else
+                await next();
+        });
+    }
 }

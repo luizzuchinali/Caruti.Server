@@ -5,6 +5,8 @@
 
 var app = new WebApplication(server);
 
+app.UseStaticFiles("public");
+
 app.Use("/users", async (_, response) =>
 {
     const string html = "<h1>Hello from Caruti</h1>";
