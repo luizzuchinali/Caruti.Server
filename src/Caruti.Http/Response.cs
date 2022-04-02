@@ -25,19 +25,26 @@ public class Response : IResponse
 
         Body = data;
 
+        await _stream.WriteAsync(_newLineBytes);
         await _stream.WriteAsync(Encoding.UTF8.GetBytes($"Content-Length: {data.Length}"));
         await _stream.WriteAsync(_newLineBytes);
         await _stream.WriteAsync(_newLineBytes);
         await _stream.WriteAsync(data);
+    }
+
+    public async Task SendHtml(string html, EStatusCode statusCode)
+    {
+        await _stream.WriteAsync(Encoding.UTF8.GetBytes($"{Protocol} {(int)statusCode} {statusCode}"));
+        await _stream.WriteAsync(_newLineBytes);
+        await _stream.WriteAsync(Encoding.UTF8.GetBytes("Content-Type: text/html; charset=UTF-8"));
+        await WriteBody(Encoding.UTF8.GetBytes(html));
         await _stream.FlushAsync();
     }
 
-    public async Task SendHtml(string html, int statusCode)
+    public async Task StatusCode(EStatusCode statusCode)
     {
-        await _stream.WriteAsync(Encoding.UTF8.GetBytes($"{Protocol} {statusCode} OK"));
-        await _stream.WriteAsync(_newLineBytes);
-        await _stream.WriteAsync(Encoding.UTF8.GetBytes("Content-Type: text/html; charset=UTF-8"));
-        await _stream.WriteAsync(_newLineBytes);
-        await WriteBody(Encoding.UTF8.GetBytes(html));
+        await _stream.WriteAsync(Encoding.UTF8.GetBytes($"{Protocol} {(int)statusCode} {statusCode}"));
+        await WriteBody(Array.Empty<byte>());
+        await _stream.FlushAsync();
     }
 }

@@ -6,6 +6,6 @@ public interface IRequest
     public string Path { get; }
     public string Protocol { get; }
     public string? Query { get; }
-    public byte[]? Body { get; }
-    public IDictionary<string, string[]> Headers { get; }
+    public ReadOnlyMemory<byte>? Body { get; }
+    public IReadOnlyDictionary<string, string> Headers { get; }
 }

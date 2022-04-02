@@ -1,42 +1,59 @@
-﻿namespace Caruti.Http;
+﻿using System.Collections.Immutable;
+using System.Collections.ObjectModel;
+using System.Net.Sockets;
+
+namespace Caruti.Http;
 
 public sealed class Request : IRequest
 {
-    public string Method { get; }
-    public string Path { get; }
-    public string Protocol { get; }
+    public string Method { get; private set; }
+    public string Path { get; private set; }
+    public string Protocol { get; private set; }
     public string? Query { get; }
 
     //TODO: Implement request body setter
-    public byte[]? Body { get; }
-    public IDictionary<string, string[]> Headers { get; } = new Dictionary<string, string[]>();
+    public ReadOnlyMemory<byte>? Body { get; private set; }
+    public IReadOnlyDictionary<string, string> Headers { get; private set; }
 
-    public Request(ReadOnlyMemory<byte> buffer)
+    private Request(string method,
+        string path,
+        string protocol,
+        string? query,
+        IReadOnlyDictionary<string, string> headers,
+        byte[] body)
     {
-        (Method, var currentBuffer) = GetNextWord(buffer).GetOrThrowException();
-        (Path, currentBuffer) = GetNextWord(currentBuffer).GetOrThrowException();
-        (Protocol, currentBuffer) = GetNextWord(currentBuffer).GetOrThrowException();
-
-        Query = GetQueryString();
-
-        var result = GetNextHeader(currentBuffer);
-        while (result != null)
-        {
-            var (key, value, curBuffer) = result.Value;
-            Headers.Add(key, new[] { value });
-            result = GetNextHeader(curBuffer);
-        }
+        Method = method;
+        Path = path;
+        Protocol = protocol;
+        Query = query;
+        Headers = headers;
+        Body = body;
     }
 
-    private static (string, ReadOnlyMemory<byte>)? GetNextWord(ReadOnlyMemory<byte> buffer)
+    public static async Task<Request> Create(NetworkStream stream)
     {
-        var span = buffer.Span;
+        var buffer = new byte[1024 * 8];
+        await stream.ReadAsync(buffer);
+
+        (var method, buffer) = GetNextWord(buffer).GetOrThrowException();
+        (var path, buffer) = GetNextWord(buffer).GetOrThrowException();
+        (var protocol, buffer) = GetNextWord(buffer).GetOrThrowException();
+
+        var query = GetQueryString(path);
+        var headers = GetHeaders(buffer);
+
+        //TODO: implement body
+        return new Request(method, path, protocol, query, headers, new byte[255]);
+    }
+
+    private static (string, byte[])? GetNextWord(byte[] buffer)
+    {
         for (var i = 0; i < buffer.Length; i++)
         {
-            var currentChar = (char)span[i];
+            var currentChar = (char)buffer[i];
             if (currentChar is not (' ' or '\r')) continue;
 
-            var word = Encoding.UTF8.GetString(span[..i]);
+            var word = Encoding.UTF8.GetString(buffer[..i]);
             _ = word ?? throw new MalformedHttpRequestException();
 
             return (word, buffer[(i + 1)..]);
@@ -45,15 +62,14 @@ public sealed class Request : IRequest
         return null;
     }
 
-    private static (string, string, ReadOnlyMemory<byte>)? GetNextHeader(ReadOnlyMemory<byte> buffer)
+    private static (string, string, byte[])? GetNextHeader(byte[] buffer)
     {
-        var span = buffer.Span;
         for (var i = 0; i < buffer.Length; i++)
         {
-            var currentChar = (char)span[i];
+            var currentChar = (char)buffer[i];
             if (currentChar is not '\r') continue;
 
-            var header = Encoding.UTF8.GetString(span[..i]);
+            var header = Encoding.UTF8.GetString(buffer[..i]);
             _ = header ?? throw new MalformedHttpRequestException();
 
             var doubleQuoteIndex = header.IndexOf(':');
@@ -68,9 +84,23 @@ public sealed class Request : IRequest
         return null;
     }
 
-    private string? GetQueryString()
+    private static IReadOnlyDictionary<string, string> GetHeaders(byte[] buffer)
     {
-        var indexOfQuery = Path.IndexOf('?', StringComparison.Ordinal);
+        var result = GetNextHeader(buffer);
+        var headers = new Dictionary<string, string>();
+        while (result != null)
+        {
+            (var key, var value, buffer) = result.Value;
+            headers.Add(key, value);
+            result = GetNextHeader(buffer);
+        }
+
+        return headers;
+    }
+
+    private static string? GetQueryString(string path)
+    {
+        var indexOfQuery = path.IndexOf('?', StringComparison.Ordinal);
         if (indexOfQuery == -1) return null;
 
         //TODO: Implementar acesso a query string

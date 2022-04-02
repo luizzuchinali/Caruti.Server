@@ -4,6 +4,8 @@ public class WebApplication : IWebApplication
 {
     private IApplicationServer Server { get; }
 
+    private readonly IDictionary<string, Func<IRequest, IResponse, Task>> _routes;
+
     private readonly ICollection<Func<IRequest, IResponse, Func<Task>, Task>> _middlewares;
 
     public WebApplication(IApplicationServer server)
@@ -11,34 +13,38 @@ public class WebApplication : IWebApplication
         Server = server;
         Server.OnReceiveConnection = ReceiveConnection;
         _middlewares = new List<Func<IRequest, IResponse, Func<Task>, Task>>();
+        _routes = new Dictionary<string, Func<IRequest, IResponse, Task>>();
     }
 
     public Task Listen(CancellationToken cancellationToken = default)
     {
+        Use(async (request, response) =>
+        {
+            if (!_routes.ContainsKey(request.Path))
+            {
+                await response.StatusCode(EStatusCode.NotFound);
+            }
+            else
+            {
+                var route = _routes[request.Path];
+                await route.Invoke(request, response);
+            }
+        });
+
         return Server.Listen(cancellationToken);
     }
 
     private async Task ReceiveConnection(IConnection connection, CancellationToken cancellationToken)
     {
         var stream = connection.Stream;
+
+        //TODO: add configuration capability to change default request size
         while (connection.Connected && !cancellationToken.IsCancellationRequested)
         {
-            //TODO: add configuration capability to change default request size
-            var buffer = new byte[1024 * 8];
-            var bufferIndex = 0;
-            while (stream.Socket.Available != 0)
-            {
-                buffer[bufferIndex] = (byte)stream.ReadByte();
-                bufferIndex++;
-            }
-
-            if (bufferIndex == 0)
+            if (stream.Socket.Available == 0)
                 continue;
 
-            var readOnlyBuffer = new ReadOnlyMemory<byte>(buffer);
-
-            //TODO: share between request/response protocol informations
-            var request = new Request(readOnlyBuffer);
+            var request = await Request.Create(stream);
             var response = new Response(request.Protocol, stream);
 
             try
@@ -53,7 +59,7 @@ public class WebApplication : IWebApplication
             }
 
             if (!request.Headers.ContainsKey("Connection") || !request.Headers["Connection"].Contains("keep-alive"))
-                connection.Close();
+                break;
         }
     }
 
@@ -77,4 +83,7 @@ public class WebApplication : IWebApplication
             await action.Invoke(request, response);
             await next();
         });
+
+    public void Use(string path, Func<IRequest, IResponse, Task> action) =>
+        _routes.Add(new KeyValuePair<string, Func<IRequest, IResponse, Task>>(path, action));
 }
