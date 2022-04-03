@@ -1,4 +1,6 @@
-﻿namespace Caruti.Http;
+﻿using System.Text.RegularExpressions;
+
+namespace Caruti.Http;
 
 public class WebApplication : IWebApplication
 {
@@ -8,7 +10,8 @@ public class WebApplication : IWebApplication
 
     private readonly ICollection<Func<IRequest, IResponse, Func<Task>, Task>> _middlewares;
 
-    private CancellationToken _cancellationToken = CancellationToken.None;
+    //TODO: move to a RouteHandler
+    public static readonly Regex PathWithParamRegex = new Regex("{(.)*}", RegexOptions.Compiled);
 
     public WebApplication(IApplicationServer server)
     {
@@ -20,22 +23,47 @@ public class WebApplication : IWebApplication
 
     public Task Listen(CancellationToken cancellationToken = default)
     {
-        _cancellationToken = cancellationToken;
-
         Use(async (request, response) =>
         {
-            if (_routes.ContainsKey(request.Path))
+            var key = MatchRoute(request.Path, _routes.Keys);
+            if (key != null)
             {
-                var route = _routes[request.Path];
+                var route = _routes[key];
+                request.SetParams(key);
                 await route.Invoke(request, response);
             }
             else
-            {
                 await response.StatusCode(EStatusCode.NotFound);
-            }
         });
 
         return Server.Listen(cancellationToken);
+    }
+
+    //TODO: move route matching and route especific things to a RouteHandler and Route classes 
+    private string? MatchRoute(string path, IEnumerable<string> keys)
+    {
+        if (_routes.ContainsKey(path))
+            return path;
+
+        var pathsWithParams = keys.Where(x => PathWithParamRegex.IsMatch(x));
+        var matchRegex = GetPathMatchRegex(path);
+        return pathsWithParams.SingleOrDefault(x => matchRegex.IsMatch(x));
+    }
+
+    private static Regex GetPathMatchRegex(string path)
+    {
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var patternBuilder = new StringBuilder();
+        const string paramPattern = "|/{(.)*})";
+        foreach (var part in parts)
+        {
+            patternBuilder.Append('(');
+            patternBuilder.Append('/');
+            patternBuilder.Append(part);
+            patternBuilder.Append(paramPattern);
+        }
+
+        return new Regex(patternBuilder.ToString());
     }
 
     private async Task ReceiveConnection(IConnection connection, CancellationToken cancellationToken)
@@ -101,7 +129,7 @@ public class WebApplication : IWebApplication
                 var filePath = Path.Combine(Environment.CurrentDirectory, request.Path[1..]);
                 if (File.Exists(filePath) && !request.Path.Contains(".."))
                 {
-                    var fileBuffer = await File.ReadAllBytesAsync(filePath, _cancellationToken);
+                    var fileBuffer = await File.ReadAllBytesAsync(filePath);
                     await response.SendFile(fileBuffer, Path.GetFileName(filePath));
                 }
                 else

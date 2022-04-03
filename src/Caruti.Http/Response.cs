@@ -1,8 +1,4 @@
-﻿using System.Net.Mail;
-using System.Net.Mime;
-using MimeTypes;
-
-namespace Caruti.Http;
+﻿namespace Caruti.Http;
 
 public class Response : IResponse
 {
@@ -52,7 +48,7 @@ public class Response : IResponse
         Headers.Add("Content-Type", MimeTypeMap.GetMimeType(filename));
         await WriteResponse(fileBytes);
     }
-    
+
     public async Task SendHtml(string html, EStatusCode statusCode)
     {
         await _stream.WriteAsync(Encoding.UTF8.GetBytes($"{Protocol} {(int)statusCode} {statusCode}"));

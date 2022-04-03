@@ -1,4 +1,6 @@
-﻿namespace Caruti.Http;
+﻿using System.Reflection;
+
+namespace Caruti.Http;
 
 public sealed class Request : IRequest
 {
@@ -8,6 +10,10 @@ public sealed class Request : IRequest
     public string Protocol { get; private set; }
     public string? Query { get; }
 
+    //if don't have params, not alocate the dictionary
+    private IDictionary<string, object>? _params;
+
+    //TODO: Implement per request cancellationToken
     //TODO: Implement request body setter
     public ReadOnlyMemory<byte>? Body { get; private set; }
     public IReadOnlyDictionary<string, string> Headers { get; private set; }
@@ -43,6 +49,38 @@ public sealed class Request : IRequest
 
         //TODO: implement body
         return new Request(method, path, protocol, query, headers, new byte[255]);
+    }
+
+    public void SetParams(string template)
+    {
+        _params ??= new Dictionary<string, object>();
+
+        var templateParts = template.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var pathParts = Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        for (var i = 0; i < templateParts.Length; i++)
+        {
+            var isParam = WebApplication.PathWithParamRegex.IsMatch(templateParts[i]);
+            if (!isParam) continue;
+
+            //Remove { and } from template
+            var lastBracketIndex = templateParts[i].Length - 1;
+            templateParts[i] = templateParts[i][1..lastBracketIndex];
+            _params.Add(templateParts[i], pathParts[i]);
+        }
+    }
+
+    public T GetParam<T>(string paramName)
+        where T : struct, ISpanFormattable, IComparable, IComparable<T>, IEquatable<T>
+    {
+        //TODO: Implement especific exception
+        if (_params == null)
+            throw new InvalidOperationException();
+
+        var value = _params[paramName];
+        var type = typeof(T);
+        var parse = type.GetMethods(BindingFlags.Public | BindingFlags.Static).First(x => x.Name.Equals("Parse"));
+        return (T)parse.Invoke(null, new[] { value })!;
     }
 
     private static (string, byte[])? GetNextWord(byte[] buffer)
