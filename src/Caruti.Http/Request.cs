@@ -1,21 +1,19 @@
-﻿using System.Reflection;
-
+﻿
 namespace Caruti.Http;
 
 public sealed class Request : IRequest
 {
-    public string Method { get; private set; }
+    public HttpMethod Method { get; private set; }
     public string Path { get; private set; }
     public string Uri { get; private set; }
     public string Protocol { get; private set; }
     public string? Query { get; }
 
-    //if don't have params, not alocate the dictionary
+    //not alocate if don't have params in template
     private IDictionary<string, object>? _params;
 
     //TODO: Implement per request cancellationToken
-    //TODO: Implement request body setter
-    public ReadOnlyMemory<byte>? Body { get; private set; }
+    public byte[] Body { get; }
     public IReadOnlyDictionary<string, string> Headers { get; private set; }
 
     private Request(string method,
@@ -23,9 +21,9 @@ public sealed class Request : IRequest
         string protocol,
         string? query,
         IReadOnlyDictionary<string, string> headers,
-        byte[] body)
+        ref byte[] body)
     {
-        Method = method;
+        Method = new HttpMethod(method);
         Uri = uri;
         var queryStringInitializerIndex = Uri.IndexOf('?');
         Path = queryStringInitializerIndex == -1 ? Uri : Uri[..queryStringInitializerIndex];
@@ -37,18 +35,31 @@ public sealed class Request : IRequest
 
     public static async Task<Request> Create(NetworkStream stream)
     {
-        var buffer = new byte[1024 * 8];
+        var buffer = new byte[1024 * 4];
         await stream.ReadAsync(buffer);
 
-        (var method, buffer) = GetNextWord(buffer).GetOrThrowException();
-        (var path, buffer) = GetNextWord(buffer).GetOrThrowException();
-        (var protocol, buffer) = GetNextWord(buffer).GetOrThrowException();
+        var method = GetNextWord(ref buffer).GetOrThrowException();
+        var path = GetNextWord(ref buffer).GetOrThrowException();
+        var protocol = GetNextWord(ref buffer).GetOrThrowException();
 
         var query = GetQueryString(path);
-        var headers = GetHeaders(buffer);
+        var headers = GetHeaders(ref buffer);
 
-        //TODO: implement body
-        return new Request(method, path, protocol, query, headers, new byte[255]);
+        //skip two new line bytes
+        buffer = buffer[2..];
+
+        var bodySize = int.Parse(headers["Content-Length"]);
+        if (buffer.Length >= bodySize)
+        {
+            buffer = buffer[..bodySize];
+            return new Request(method, path, protocol, query, headers, ref buffer);
+        }
+
+        var bodyBuffer = new byte[bodySize - buffer.Length];
+        await stream.ReadAsync(bodyBuffer);
+        Array.Copy(buffer, 0, bodyBuffer, 0, buffer.Length);
+
+        return new Request(method, path, protocol, query, headers, ref bodyBuffer);
     }
 
     public void SetParams(string template)
@@ -83,7 +94,7 @@ public sealed class Request : IRequest
         return (T)parse.Invoke(null, new[] { value })!;
     }
 
-    private static (string, byte[])? GetNextWord(byte[] buffer)
+    private static string? GetNextWord(ref byte[] buffer)
     {
         for (var i = 0; i < buffer.Length; i++)
         {
@@ -93,13 +104,14 @@ public sealed class Request : IRequest
             var word = Encoding.UTF8.GetString(buffer[..i]);
             _ = word ?? throw new MalformedHttpRequestException();
 
-            return (word, buffer[(i + 1)..]);
+            buffer = buffer[(i + 1)..];
+            return word;
         }
 
         return null;
     }
 
-    private static (string, string, byte[])? GetNextHeader(byte[] buffer)
+    private static (string, string)? GetNextHeader(ref byte[] buffer)
     {
         for (var i = 0; i < buffer.Length; i++)
         {
@@ -115,21 +127,23 @@ public sealed class Request : IRequest
 
             var key = header[..doubleQuoteIndex];
             var value = header[(doubleQuoteIndex + 1)..].Trim();
-            return (key, value, buffer[(i + 2)..]);
+
+            buffer = buffer[(i + 2)..];
+            return (key, value);
         }
 
         return null;
     }
 
-    private static IReadOnlyDictionary<string, string> GetHeaders(byte[] buffer)
+    private static IReadOnlyDictionary<string, string> GetHeaders(ref byte[] buffer)
     {
-        var result = GetNextHeader(buffer);
+        var result = GetNextHeader(ref buffer);
         var headers = new Dictionary<string, string>();
         while (result != null)
         {
-            (var key, var value, buffer) = result.Value;
+            var (key, value) = result.Value;
             headers.Add(key, value);
-            result = GetNextHeader(buffer);
+            result = GetNextHeader(ref buffer);
         }
 
         return headers;

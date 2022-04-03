@@ -6,7 +6,8 @@ public class WebApplication : IWebApplication
 {
     private IApplicationServer Server { get; }
 
-    private readonly IDictionary<string, Func<IRequest, IResponse, Task>> _routes;
+    //TODO: Change to a IEnumerable<Route>
+    private readonly IDictionary<HttpMethod, IDictionary<string, Func<IRequest, IResponse, Task>>> _routes;
 
     private readonly ICollection<Func<IRequest, IResponse, Func<Task>, Task>> _middlewares;
 
@@ -18,17 +19,17 @@ public class WebApplication : IWebApplication
         Server = server;
         Server.OnReceiveConnection = ReceiveConnection;
         _middlewares = new List<Func<IRequest, IResponse, Func<Task>, Task>>();
-        _routes = new Dictionary<string, Func<IRequest, IResponse, Task>>();
+        _routes = new Dictionary<HttpMethod, IDictionary<string, Func<IRequest, IResponse, Task>>>();
     }
 
     public Task Listen(CancellationToken cancellationToken = default)
     {
         Use(async (request, response) =>
         {
-            var key = MatchRoute(request.Path, _routes.Keys);
+            var key = MatchRoute(request.Method, request.Path, _routes[request.Method].Keys);
             if (key != null)
             {
-                var route = _routes[key];
+                var route = _routes[request.Method][key];
                 request.SetParams(key);
                 await route.Invoke(request, response);
             }
@@ -40,9 +41,9 @@ public class WebApplication : IWebApplication
     }
 
     //TODO: move route matching and route especific things to a RouteHandler and Route classes 
-    private string? MatchRoute(string path, IEnumerable<string> keys)
+    private string? MatchRoute(HttpMethod method, string path, IEnumerable<string> keys)
     {
-        if (_routes.ContainsKey(path))
+        if (_routes[method].ContainsKey(path))
             return path;
 
         var pathsWithParams = keys.Where(x => PathWithParamRegex.IsMatch(x));
@@ -90,7 +91,7 @@ public class WebApplication : IWebApplication
                 continue;
             }
 
-            //TODO: Change how server reacts for Connection header
+            //TODO: Change how server reacts to Connection header
             if (!request.Headers.ContainsKey("Connection") || !request.Headers["Connection"].Contains("keep-alive"))
                 break;
         }
@@ -117,8 +118,15 @@ public class WebApplication : IWebApplication
             await next();
         });
 
-    public void Use(string path, Func<IRequest, IResponse, Task> action) =>
-        _routes.Add(new KeyValuePair<string, Func<IRequest, IResponse, Task>>(path, action));
+    public void Use(HttpMethod method, string path, Func<IRequest, IResponse, Task> action)
+    {
+        if (!_routes.ContainsKey(method))
+            _routes.Add(
+                new KeyValuePair<HttpMethod, IDictionary<string, Func<IRequest, IResponse, Task>>>(method,
+                    new Dictionary<string, Func<IRequest, IResponse, Task>>()));
+
+        _routes[method].Add(new KeyValuePair<string, Func<IRequest, IResponse, Task>>(path, action));
+    }
 
     public void UseStaticFiles(string basePath)
     {
