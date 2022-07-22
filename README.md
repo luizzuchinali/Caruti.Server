@@ -12,7 +12,7 @@ var app = new WebApplication(server);
 
 app.UseStaticFiles("public");
 
-app.Use("/hello", async (request, response) =>
+app.Get("/hello", async (request, response) =>
 {
     const string html = "<h1>Hello from Caruti</h1>";
     await response.SendHtml(html, EStatusCode.Ok);
